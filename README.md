@@ -4,7 +4,7 @@
 
 <h4><a href="https://navinlabcode.github.io/CopyKit-UserGuide/">Single Cell DNA: Copykit User Guide</a> by Darlan Minussi </h4>
 
-<h4>Single Cell RNA: Seurat Tutorial</h4> 
+<h4><a href="[https://satijalab.org/seurat/articles/get_started_v5_new]">Single Cell RNA: Seurat Tutorials</h4> 
 
 <h4><a href="https://github.com/navinlabcode/CellTrek">Spatial Transcriptomics: Basic CellTrek User Guide </a> by Runmin Wei</h4>
 
