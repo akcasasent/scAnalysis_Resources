@@ -26,4 +26,13 @@
                         </ul>
                     </div>
                 </div>
+<h2 class="section-heading">2024 Single Cell Omics Workshops</h2>
+            <div class="col-lg-12 text-center">
+                <div class="row text-left">
+                    <div class="col-lg-12">
+                        <ul>
+                                <h4><a href="2024/suerat_workshopV4.html">Single Cell RNA: Basic Seurat Tutorial V4 </a> by Anna K. Casasent</h4> 
+                                <h4><a href="2024/suerat_workshopV5.html">Single Cell RNA: Basic Seurat Tutorial V5 </a> by Anna K. Casasent</h4>
+                                <h4><a href="2024/integration_workshopV4.html">Single Cell RNA: Basic Integration Tutorial V4 </a> by Anna K. Casasent</h4> 
+                                <h4><a href="2024/integration_suerat_workshopV5.html">Single Cell RNA: Basic Integration Tutorial V4 </a> by Anna K. Casasent</h4> 
             </div>
