@@ -1,0 +1,51 @@
+Gene,Celltype
+IGKC,B/Plasma
+IGLC2,B/Plasma
+IGHG1,B/Plasma
+IGLC3,B/Plasma
+IGLC1,B/Plasma
+COL3A1,CAFs
+COL1A2,CAFs
+COL1A1,CAFs
+SFRP2,CAFs
+DCN,CAFs
+SPARCL1,Endothelial
+ACKR1,Endothelial
+CCL14,Endothelial
+VWF,Endothelial
+COL4A1,Endothelial
+TFF1,Epithelial
+LCN2,Epithelial
+KRT19,Epithelial
+SPINK1,Epithelial
+TFF2,Epithelial
+TPSAB1,Mast
+TPSB2,Mast
+CPA3,Mast
+MS4A2,Mast
+KIT,Mast
+SPP1,Myeliod
+APOE,Myeliod
+S100A9,Myeliod
+IFI30,Myeliod
+HLA-DRA,Myeliod
+HIST1H4C,Prolif Lymphoid 
+HMGB2,Prolif Lymphoid 
+STMN1,Prolif Lymphoid 
+MKI67,Prolif Lymphoid 
+CENPF,Prolif Lymphoid 
+MMP9,pMyeloid
+CTSK,pMyeloid
+ACP5,pMyeloid
+CST3,pMyeloid
+RGS10,pMyeloid
+UBE2C,Prolif Epithelial
+AKR1C2,Prolif Epithelial
+UBE2S,Prolif Epithelial
+UBE2S,Prolif Epithelial
+CCNB1,Prolif Epithelial
+CCL3,T/NK
+GNLY,T/NK
+NKG7,T/NK
+CCL4,T/NK
+IL7R,T/NK
