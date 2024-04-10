@@ -1,0 +1,1147 @@
+---
+title: "Seurat - Guided Tutorial using scRNA Breast Samples - suerat 5"
+author: "Anna K. Casasent, PhD & Rachel Dittmar PhD & Class"
+date: "`r Sys.Date()`"
+
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# output alternative github_document 
+knitr::opts_chunk$set(echo = TRUE, fig.width = 9,warning = FALSE)
+```
+
+# Introduction
+
+This is an R Markdown document that was designed to review Seurat and basic analysis of single cell RNA-seq (scRNA) data. For this tutorial we will be using a few samples from ```GSE235326``` from Kumar T, Nee K, Wei R, He S et al. A spatially resolved single-cell genomic atlas of the adult human breast. Nature 2023 Aug;620(7972):181-191. The samples selected from this data set are from 10x Genomics Chromium Single Cell 3' v3.1 Chemistry. 
+
+This tutorial will review the following items in standard analysis of using the Seurat package: 
+
+1. Create Seurat objects 
+    * single sample 
+    * a list of samples
+    
+2. Examine basic quality control
+    * number of genes (nFeature_RNA)
+    * number of UMIs (nCount_RNA)
+    * number of cells
+    * percentage of mito/ribo genes
+    
+3. Normalization of data 
+    * sctransform - normalization and variance stabilization of molecular count data or can be adjusted by molecular items such as percent.mt
+        * This replaces a number of normalization procedures and usually takes more time but is prefer 
+        * based on this method: https://genomebiology.biomedcentral.com/articles/10.1186/s13059-021-02451-7
+        * Seurat - manuscript covering sctransform https://link.springer.com/article/10.1186/s13059-021-02584-9
+    * Previous version would use NormalizeData - global-scaling normalization method “LogNormalize” as well as scaling methods "ScaleData" and the "FindVariableFeatures" as well. These are all normalization steps to help compare data between samples and to allow parametric methods to be used by shifting the data into a normal distribution as apposed the skewed distribution which requires non-parametric tests. 
+
+4. Cluster the cells 
+    * reduce dims and project onto 2D spaces using PCA, UMAP, TSNE
+    * find clusters with different resolution (low and high)
+    * how to you choose a resolution?
+
+5. Finding differential expressed features
+    * differential gene expression between clusters
+    * cluster naming - guided by literature
+
+The follow are covered in the second RMD File:
+
+1. Merging samples (cover in a different tutorial)
+    * Merging samples allows one to project multiple samples onto the same space.
+    * Merging does not require integration or adjustments 
+    * This is a more "raw" projection allowing testing for batch effects and the need for correction. 
+    
+2. Discussion and example of basic sample integration 
+    * Seurat internal options - CCA, RPCA, or others
+    * Harmony - fast and by sample
+    * There are many others such as scINV.
+
+3. Assigning cell type identity to clusters 
+    * manual assignment based on top genes 
+    * non-manual assignment based on label transfer from using libraries like SingleR (automated methods not covered in this demo)
+
+## Additional Resources 
+Coursera courses you might consider for ```R``` coding training although not for specific single cell analysis.
+1. Applied Data Science with R Specialization - focus more on applied coding.
+
+2. Data Science: Foundations using R Specialization - more based on fundamentals and concepts.
+
+General Written Resources 
+
+* https://learn.gencore.bio.nyu.edu/single-cell-rnaseq/ (slightly out of date but still provides a good overview)
+
+Youtube tutorials
+1. for basic R understanding and tutorials consider these:
+* https://michaelgastner.com/R_for_QR/index.html (there are paired free youtube videos)
+
+2. for more bioinformatics specific analysis consider these youtube items if you don't want to look for a Coursera course.
+* https://www.youtube.com/c/ChipsterTutorials/featured
+* https://www.youtube.com/c/Bioinformagician 
+
+# R project
+
+## Helpful R tips 
+
+* If you want to know more about a function there is a function you can use  ```?FUNCTION_NAME``` to examine the inputs, where ```FUNCTION_NAME``` is the name of the function using the correct function capitalization. 
+
+* If you are doing this in an interactive version, you can use the files location and walk the click through to get the data location and set a new directory - using R studio use the side panel with the Files and you can walk through your home directory and set a new directory. 
+
+## libraries 
+We will be using the following libraries. These should be available if you are using the server. However, you might need to install them. Note this tutorial was prepared using ```r version$version.string``` and Seurat 5, but should work fine with version 4. 
+
+If you needed to install them for: 
+
+1. Seurat - ```install.packages('Seurat')```
+
+2. ggplot - ```install.packages("ggplot2")```
+
+3. devtools - ```install.packages("devtools")```
+
+4. patchwork -  ```devtools::install_github("thomasp85/patchwork")```
+
+5. dplyr  - ```install.packages("dplyr")```
+
+6. readxl - ```install.packages("readxl")```
+
+7. hdf5r - ```install.packages("hdf5r")``` - new package 
+
+8. BiocManager - ```install.packages('BiocManager')``` - optional: new package allows you to match the correct version of R with glmGamPoi you wanted
+
+9. glmGamPoi - ```BiocManager::install("glmGamPoi")``` - optional: new package speeds up SCTransform 
+
+10. presto - ```devtools::install_github('immunogenomics/presto')``` - optional: new package speeds up FindMarkers function. Note this will also may require that you install underlying package on your OS.
+
+
+```{r libraries}
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(readxl)
+library(hdf5r)
+library(glmGamPoi)
+library(BiocManager)
+library(presto)
+```
+
+## Set working direcotry 
+This will need to be changed to the specific location where you have placed the data.
+You should specify where you are working and set the directory.
+
+__Functions for this section:__ 
+
+1. ```<-``` Base R function - this is the assign function that is fairly R specific. You can also use ```=``` which is a more common assign syntax in other languages. 
+
+2. ```setwd``` Base R function - This will set your directory to the string you provided. If you have permissions to that location and if you have provided a validate option.  
+
+__Note__ the slash direction is due to being run on either a Mac or Linux, If you are using a Windows machine you your slashes will be ```\``` instead this can be set using the ```.``` if are unsure. 
+
+__Note__ Ideally, you would not need to set your working directory. Your files should be together in a folder. To this end, I suggest a structure of functions, reports, and data under each project folder. Example: 
+
+1. data
+
+2. functions
+
+3. figures 
+
+4. output
+
+5. reports
+
+Your structure will likely vary by project.
+
+```{r setdir}
+#your_working_dir <- "/Users/Instructor/Downloads/SC_Workshop/"
+your_working_dir <- "/Users/akcasasent/Desktop/Teaching/GSE235326/"
+setwd(your_working_dir)
+```
+
+For this tutorial make sure wherever you have set your working directory that contains the folder called ```data``` in it and within that folder you have downloaded the 3 or more h5 files from the HBCA sample from GEO: GSE235326 https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE235326 or for more complete items from https://explore.data.humancellatlas.org/projects/1ffa2223-28a6-4133-a5a4-badd00faf4bc . 
+
+## Create Seurat Objects from h5 
+You can read in data from ```Read10X_h5``` format or from more basic output of ```Read10X``` which takes the input of a directory with three files ```matrix.mtx``` file, ```barcodes.tsv``` file, and ```genes.tsv``` file.
+
+__Note__ h5 is used because you can provide just one file with the same information in a sparse matrix format. This is the format these files were uploaded as into GEO which makes them the easiest to get in the case of this project.
+
+### Reading in object
+
+Functions for this section: 
+
+1. ```list.files``` base R function - lists the file in a vector
+
+2. ```paste0``` base R function - concatenated together strings default is directly connected aka 0 spaces.
+
+3.  ```print``` base R function - prints output to screen
+
+4. ```Read10X_h5``` __seurat__ - reads in a h5 matrix and transforms it to a sparse matrix. 
+
+```{r create_object}
+# read in a single file
+# this shows the full path for the files that have been read in
+# note the files are all in the "data" folder
+data_file_list <- list.files(paste0(your_working_dir,"data/"), full.names = TRUE)
+data_file_list
+# note this grabs just the first file
+my_file_name <-  paste0(data_file_list[1])
+print(my_file_name)
+
+hbca.data <- Read10X_h5(filename = my_file_name)
+```
+For this example we are using ```GSM7500359_hbca_c50_raw_feature_bc_matrix.h5```. However, you can change it by change the number here. Notice I am currently showing a partially hard coded method so that I show you how you remove the hardcoding when you run this in a loop. But so you can see what each of items is or should be.
+
+### Initialize object 
+I usually suggest to be consistent with how you are assigning features but here I just wanted to show that the ```=``` and ```<-```` both work to assign items. 
+
+__Note__ We call these features not genes because we use a very similar form for other items. Such as when you have antibodies or other information also held in these locations.  
+```{r set_limits}
+min_cells = 3 
+min_features <- 200
+```
+
+Here we choose how much of the raw data we want to work with by setting specific limits. 
+
+Here we state that we require a gene to be present in at least ```r min_cells``` cells and each cell is required to have at least ```r min_features``` features or genes.
+
+Functions:
+
+1. ```paste``` base R - also to Concatenate Strings but this has standard ```sep``` is a single space. Also you can use ```collapse``` to combine items across vectors. 
+
+2. ```strsplit``` base R - split strings based on Elements here I used underscores. __Note__ due to how it returns items I removed the the list and just collect the vector. 
+
+3. ```:``` this is handy function to have sequential items. 1:4 creates a vector 1,2,3,4. In this case we select the the first list[[1]] and the second and third item [2:3]
+
+4. ```CreateSeuratObject```this is a __SeuratObject__ function. It creates a Seurat object from the raw data. During this step you can also set a min cells and min features/genes which will remove items below the threshold. For a completely raw data you would set both min cells and feature to zero. 
+
+__Note__ The min cells and min features are unique. For individual samples, if is often good to leave the min as zero because otherwise you can filter out genes that vary across different samples. Later, you can set the threshold for the whole data set as the same time. Further, you often want to determine the min gene experimentally. For example an immune sets often require a lower the threshold similar to the cut of used for frozen nuclei samples. Fresh tumor cells on the other hand often have more genes expressed and might require a higher threshold. 
+
+* For ```min.cells``` a good starting place for a min between 3-5 cells. However, sometimes it makes sense to not include this threshold at all for a single sample and only apply it when you have multiple samples. 
+
+* For ```min.features``` (fresh single cell) a good starting place for fresh samples is between 100 to 200. Lean towards lower bound for immune heavy samples where you have selected for immune cells in your experiment. If you have very viable and therefore very good samples having this set at higher end makes sense. This number is also going to be impacted by sequencing coverage and depth. I would usually start at 200 for these. 
+
+* For ```min.features``` (frozen or single nuclei) a good starting place for frozen or nuclei samples reasonable range is between 50 to 150. Lean towards lower bound for immune heavy samples where you have selected for immune cells in your experiment. I would usually start at 100 for these. 
+
+* __Alternative method of thresholding__ Other people also will choose their ranges using the standard dev or median absolute deviation. However you need to be careful with these and usually these do not help for setting the lower bound of the threshold so much as the upper. 
+
+```{r clean_object}
+# get the sample name by pulling it from the first second and third part of the string when split by underscores.
+
+# you may need to change what the 2:3 for is for your sample depending on the path to the directory
+sample_name <- paste(strsplit(my_file_name, split = "_")[[1]][2:3], collapse = "_")
+sample_name
+# creates an object, using the filters from the previous sections.
+hbca <- CreateSeuratObject(counts = hbca.data, project = sample_name, min.cells = min_cells, min.features = min_features)
+
+# let you look at the overview of the seurat object.
+hbca
+```
+
+## Basic quality control
+
+Below we add the percentage of a specific feature.
+In this object we are assigning the seurat object a meta feature called ```percent.mt``` for percent of mitochondrial genes. 
+
+Functions:
+
+1. ```PercentageFeatureSet``` - This Seurat specific function allows you to use regular expression patterns to select features (genes) and calculate the percentage of those genes within the gene expression of your samples.
+
+For R regular expressions a good source is - https://r4ds.had.co.nz/strings.html or https://www.datacamp.com/tutorial/regex-r-regular-expressions-guide. 
+
+2. ```^``` at the beginning of the regular expression this notes that this should be the first character. 
+
+3. ```RP[SL]``` In this expression, "RP" matches genes that encode for ribosomal proteins, "S" or "L" specifies the subunit of the ribosome
+
+4. ```:digit:``` matches any digit
+
+5. ```|``` this an or functions
+
+### Mitochondrial genes percentage
+Here is the example with mitochondrial genes percentage, which is often used to assess sample quality with a high fraction of apoptotic or lysing cells. High in this case is consider bad. 
+
+```{r qc_mito}
+hbca[["percent.mt"]] <- PercentageFeatureSet(hbca, pattern = "^MT-")
+```
+
+### Ribosomal genes percentage
+
+Ribosomal protein genes are used in the filtering of single-cell RNA sequencing data to assess the quality of the data and remove poor-quality cells. The proportion of ribosomal protein reads can be an indicator of RNA degradation, and high ribosomal protein content can be associated with specific cell types, such as immune cells.
+
+However, they can also be regressed out depending on what you are analyzing. 
+Note that in this case we have multiple patterns (genes starting with "RP", "RPLP", and "RPSA"). 
+
+```{r qc_ribo}
+hbca[["percent.rb"]] <- PercentageFeatureSet(hbca, pattern = "^RP[SL][[:digit:]]|^RPLP[[:digit:]]|^RPSA")
+```
+
+### ratio of genes and umi
+This produces a ratio that is related to how much saturation of the umis there per gene. 
+
+```{r qc_ratio_gene_umi}
+hbca[["umi_gene_ratio"]] <- log10(hbca@meta.data$nCount_RNA/hbca@meta.data$nFeature_RNA)
+```
+
+### Mitochondrial and Ribosomal genes percentage
+Add the Mitochondrial and Ribosomal genes percentage together. 
+
+```{r qc_rb_mt}
+hbca[["mt_rb"]] <- hbca@meta.data$percent.mt + hbca@meta.data$percent.rb
+```
+
+### Example the structure
+Examine the meta data where QC or cells specific information could be stored.
+
+Functions: 
+
+1. ```head``` function from utils package (fairly basic R package). This results the first part of a data frame, table, matrix or vector. 
+
+2. ```tail``` function that starts from the bottom instead of the top.
+
+Specifically, these functions can be useful to examine the meta data in the Seurat object and look at top 5 items.
+
+If you wanted to look at the whole thing you can use ```view``` but it can crash R if too large.
+
+```{r meta_head}
+head(hbca@meta.data, 5)
+```
+It is also good to check the summary for the items before you move on.
+
+```{r summary_hbca}
+summary(hbca@meta.data)
+```
+### Visualize the QC 
+One of the first items you want to do when looking at your data is visualize the quality of the samples. 
+
+#### Violin Plots 
+Visualize QC metrics as a violin plot. 
+
+Functions: 
+
+1. ```VlnPlot``` - Seurat specific function which can show violin plot of single cell data. This can be anything from QC metrics, meta data, scores or single or combined gene expression values. Note you can have multiple items including different ncols. 
+
+When you examining the violin plots, some cut offs to keep in mind are either using the standard deviations or median absolute deviations. Alternatively strict pre-defined cuts offs are possible. However, these are often very arbitrary and likely need to vary by sample. 
+
+As discussed previously: 
+
+* __nFeature__: represents the number of unique genes detected in each cell
+
+* __nCount__: represents the total number of molecules (UMIs) detected within a cell
+
+* __umi gene ratio__: represents the number of genes detected per UMI (unique molecular identifier) for each cell.  A higher UMI gene ratio indicates that more genes are detected per UMI, which is generally considered a good indicator of data quality. However, can also show duplicates. 
+
+* __percent mt__: percent of mitochondrial genes. 
+
+* __percent rb__: percent of Ribosomal genes. 
+
+* __mt rb__: percent of mitochondrial genes and Ribosomal genes together. 
+
+```{r vis_qc_vln}
+VlnPlot(hbca, features = c("nFeature_RNA", "nCount_RNA", "umi_gene_ratio", "percent.mt", "percent.rb", "mt_rb"), ncol = 3)
+```
+
+#### Scatter Plots 
+Visualize QC metrics as a scatter plot to visualize feature-feature relationships.
+
+Example: 
+
+* nCounts vs nFeatures (Where an identity line is almost expected)
+
+* nCounts vs mito genes (where the relation is less focused)
+
+Functions: 
+1. ```FeatureScatter``` - Seurat function to create a scatter plot using 2 different features. Here you can examine how these items are correlated or not. Note this by default using __Pearson correlation__ between the 2 features. In the most basic form you specific the 2 different features.
+
+```{r vis_qc_scat1}
+plot1 <- FeatureScatter(hbca, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") 
+plot2 <- FeatureScatter(hbca, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot1 + plot2
+```
+
+* nCounts vs ribo genes (where the relation is less focused)
+
+* mito genes vs ribo genes 
+```{r vis_qc_scat2}
+plot3 <- FeatureScatter(hbca, feature1 = "nCount_RNA", feature2 = "percent.rb")
+plot4 <- FeatureScatter(hbca, feature1 = "percent.mt", feature2 = "percent.rb")
+plot3 + plot4
+```
+
+__Notes__
+
+Pearson correlation does not always makes sense for these types of comparison. 
+For example it assume: 
+
+1. Independence of variable. Example of issue - percentage of RB and MT expression are going to be dependent as they are a calculation of percentage.
+
+2. Proportion Data - percentage also violates this. 
+
+3. Nonlinear Relationships - can still be significant relationships 
+
+4. Pearson correlation is a parametric test - which assume a normal distribution of data and is used to measure the strength and direction of the linear relationship in 2 different variables. However, single cell data is rarely "normally distributed". 
+
+Therefore here we show how to calculate spearman correlations for the meta.variables across all cells. 
+
+Functions: 
+
+1. ```cor``` - this allows you to correlate two matrices or data.frames. 
+
+2. ```[,-1]``` - this removes the first column. Note __R__ is indexing starts with 1 and the negative says to remove it. 
+
+3.```[row,col]``` -  this lets you access items in a matrix. 
+
+```{r vis_qc_spearman}
+head(hbca@meta.data,5)
+# remove the first column because it is 
+spearman_corr <- cor(x=hbca@meta.data[,-1], method = "spearman")
+spearman_corr
+```
+
+Items can also be access by name rownames and colnames. 
+```{r vis_qc_spearman_item}
+spearman_corr["nCount_RNA","nFeature_RNA"]
+```
+
+Other useful function: 
+ ```signif``` - rounds the values to the specified number of digits.
+
+```sign``` - returns the sign of vector as either positive or negative numbers.
+
+#### Quality Control cuts off
+This is where we reach more of a grey area with respect to quality control cut offs. How you set your cutoffs and the rationale behind setting them will strongly depend on the project. Outside of hard cut off values (thresholds), you may also choose to set your cut offs by standard deviation from the mean (parametric method - not preferred for single cell data) or median absolute distance from the median (non-parametric method - slightly more preferred in single cell data.)
+
+Common standards that people often put in place are to cut off include using: standard dev (parametric), median absolute distance (non-parametric) or a hard number cut off (threshold) to be used across samples. The easiest to check is the hard threshold, but these can be troublesome causing loss of too much data. 
+
+For example, cancer treatment samples, where you might have huge changes in viability. Therefore, a strict viability for the pre-treated and post-treated samples might not be comparable.
+
+In the paper for these samples the following cut offs were used, therefore we will use similar values. You can find these in the methods section for the HBCA paper. So as to not compare apples to oranges, we will use these cuts offs. 
+
+```{r features_cutoff}
+min_nFeature = 200
+max_nFeature = 2500
+min_nCount = 500
+max_nCount = 20000
+
+# below are percentage cut offs
+max_mito = 10
+max_ribo = 50
+```
+
+However, note that these items my be different based one: 
+
+1. __The cell type__
+
+  * in our data sets, we saw some of immune cells tend to have lower number of expressed genes. 
+  
+  * tumor cells are often have increased ploidy and therefore an increase in number of genes. 
+  
+2. __The tissue type__
+
+  * mt - Example: Heart or brown adipose tissue would be expected to have higher mito gene expression. This is thought to be due to oxidative metabolism and correlate with high energy demands and metabolism. Therefore, there are reasons people might even keep items. (https://doi.org/10.1016/j.mito.2018.01.004) 
+
+3. __Single cell vs single nuclei__ 
+
+  * expect that we will have less genes, features or umis in single nuclei than in cell due to lack of cytoplasmic RNA
+  
+Function: 
+
+1. ```subset``` - this functions allows you subset or filter you data based on metrics. Here we use all the cuts of in a single line.
+
+2. ```&``` logical operations for AND. 
+
+3. ```<``` comparison operations for less than 
+
+4. ```>``` comparison operations for greater than 
+
+So, this ```subset``` function below removed cells will __any__ of these thresholds. 
+```{r select_features}
+# an unfiltered version to show items
+unfiltered_hbca <- hbca
+
+# filter the main object of interest
+hbca <- subset(hbca, subset = nFeature_RNA > min_nFeature &
+                 nFeature_RNA < max_nFeature & 
+                 nCount_RNA > min_nCount & 
+                 nCount_RNA < max_nCount & 
+                 percent.mt < max_mito & 
+                 percent.rb < max_ribo)
+```
+
+__Note__ you could also have set a cut off based on ```mad``` and ```median``` or ```sd``` and ```mean```. These often allow more data to be included, but provide issues when not well documented about "why" a cut off was selected. Also, if per sample and some people find this bad. 
+
+__Question:__ How would you select the mad below and above the median for each of these cut offs?
+
+## data lost 
+Note that for each of the filters you will lose data. 
+Sometimes people like to examine what each of these items are so you can see what you are loosing as you filter you samples. 
+
+Here, we created a function in order to draw the lines on the plots easier. When created, a function each item that you leave unassigned means that input is required. 
+
+The ones where you have an assignment, becomes the defaults. 
+
+The ```...``` (Ellipsis) allows assignment of underling parameters. I generally suggest when passing a function you allow this to be passed as well because it allows the end user to making more adjustments if they need.
+
+__Note__ we declare the function, including setting it for standard use for with min and max.
+
+```{r select_features_plot_function}
+VlnPlot_lines <- function(data, myfeature, vcutoff, vcolor=c("blue", "red"), vplacement=c(1, 0.95), my.pt.size=0, plotfill="grey", ...)
+{
+  vplot_feature <- VlnPlot(data, features = myfeature, pt.size = my.pt.size) +
+  scale_fill_manual(values = plotfill) +
+  geom_hline(yintercept = vcutoff,  color = vcolor) 
+  
+  for(index in 1:length(vcolor))
+  {
+    vplot_feature <- vplot_feature + annotate("text", x = vplacement[index], y = vcutoff[index], label = sum(data[[myfeature]] < vcutoff[index]), vjust = -1, hjust = 0, color = vcolor[index])
+  }
+  print(vplot_feature)
+}
+```
+
+Here we provide the feature with the number of cells that would be cut off at each these cuts offs. 
+
+```{r select_features_plot_min_max_feature}
+VlnPlot_lines(data=unfiltered_hbca, myfeature="nFeature_RNA", vcutoff=c(min_nFeature, max_nFeature), vplacement=c(1.45,.75))
+VlnPlot_lines(data=unfiltered_hbca, myfeature="nCount_RNA", vcutoff=c(min_nCount, max_nCount), vplacement=c(1.10,.83))
+VlnPlot_lines(data=unfiltered_hbca, myfeature="percent.mt", vcutoff=c(max_mito), vcolor="red", vplacement=.85)
+VlnPlot_lines(data=unfiltered_hbca, myfeature="percent.rb", vcutoff=c(max_ribo), vcolor="red", vplacement=.85)
+```
+
+In order, we will run these filters and record the number of cells removed at each step of the filter. Note it is possible for more than one filter to remove the same cell. This means when we add up all the cells removed, some cells may be counted more than once.
+
+Here we will count for each feature how many cells are removed. 
+
+__Question - How would you determine which filters removed the same cells?__ 
+
+Ways of measuring some of the filters for specific items. 
+
+1. Count off ```nFeature_RNA > min_nFeature``` results in ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nFeature_RNA > min_nFeature))``` being filtered.
+
+2. ```nFeature_RNA < max_nFeature``` results in ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nFeature_RNA < max_nFeature))``` being filtered.
+
+3. ```nCount_RNA > min_nCount``` results in ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nCount_RNA > min_nCount))``` being filtered.
+
+4. ```nCount_RNA < max_nCount``` results in ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nCount_RNA < max_nCount))``` being filtered.
+
+5. ```percent.mt < max_mito``` results in ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = percent.mt < max_mito))``` being filtered.
+
+6. ```percent.rb < max_ribo``` results in ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = percent.rb < max_ribo))``` being filtered.
+
+7. Total amount filtered is ```r ncol(unfiltered_hbca) - ncol(hbca)```. 
+
+__Note__ these some cells might have been filtered multiple times in this description. How can you tell if an item would be counted more than once?
+
+```{r select_features_plot_after_filter}
+VlnPlot(hbca, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.rb"), ncol = 4)
+#show with unfiltered and ABlines
+```
+
+### Alterative Filtering
+In this section, we demonstrate an alternative filtering method that could be used instead of strict cut off. These cut offs would instead be calculated for each sample. However, one issue with this method is that it is harder to double check what you have filtering. Alternatively, the threshold method can simply be checked using print max for each cutoff. 
+
+In order to preform this, I need to introduce you to some other functions that are from base and based on calculation.
+
+Functions: 
+
+1. ```apply``` this lets you run through vector, array or list. This function allows better parallelization of a for loop. If using 1 you are applying across rows, if using 2 you are applying across columns. You can write you own functions or use functions already in R. Such as those provided here: median, mad, mean, sd, and others. 
+
+2. ```median``` calculated the median from a vector -- nonparametric tests
+
+3. ```mad``` calculated the median absolute value from a vector -- nonparametric tests
+
+4. ```mean``` calculated the mean from a vector -- parametric tests
+
+5. ```sd``` calculated the standard deviation value from a vector -- parametric tests
+
+Note the Apply function can be confusing to start however, it is very similar to a for loop. 
+Where the function is applied for each column or row in the array. 
+
+If you need to gain more understanding of for loops: 
+1. https://www.geeksforgeeks.org/for-loop-in-r/
+
+2. If you want to understand more about loops in general including apply loops (second to last section): 
+https://www.datacamp.com/tutorial/tutorial-on-loops-in-r
+
+```{r select_features_mad}
+# save an unfiltered version to show items
+hbca_mads <- apply(unfiltered_hbca@meta.data[,-1], 2, function(my_col_vector) {mad(my_col_vector)})
+
+# Example of cut off max and min cuts offs using 3 mads +/- the median (with zero preventing items going outside negative)
+#note the 3 is hard coded you might consider using 2 or even 2.5.
+hbca_cutoffs <- apply(unfiltered_hbca@meta.data[,-1], 2, function(my_col_vector) 
+  {
+  #
+  my_max = median(my_col_vector) + 3*mad(my_col_vector) # added 3
+  my_min = median(my_col_vector) - 3*mad(my_col_vector) # added 3
+  if(my_min < 0)
+  {
+    print(paste("before changes to zero my min was:", my_min))
+    my_min <- 0 # set the min to zero if less than zero
+  }
+  data.frame(min=my_min, max=my_max)
+  })
+hbca_cutoffs
+
+# filtering based on this called 
+hbca_mad_filtered <- subset(hbca, subset = nFeature_RNA > hbca_cutoffs$nFeature_RNA$min &
+                 nFeature_RNA < hbca_cutoffs$nFeature_RNA$max & 
+                 nCount_RNA > hbca_cutoffs$nCount_RNA$min & 
+                 nCount_RNA < hbca_cutoffs$nCount_RNA$max & 
+                 percent.mt < hbca_cutoffs$percent.mt$max & 
+                 percent.rb < hbca_cutoffs$percent.rb$max)
+```
+Note that these cuts off are a bit less strict that was set previously with our hard cuts offs on the low end, but actually more strict than cut off set on the high end. Overall, you might end up losing more cells using these cuts offs, but less on the low end due to the center of the distribution.
+
+For example, 
+
+1. Count off ```nFeature_RNA > min_nFeature``` results in 
+
+previous results was ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nFeature_RNA > min_nFeature))``` being filtered. 
+
+new results would be ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nFeature_RNA >  hbca_cutoffs$nFeature_RNA$min))``` being filtered. 
+
+2. ```nFeature_RNA < max_nFeature``` results in
+
+previous result was ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nFeature_RNA < max_nFeature))``` being filtered.
+
+new result would be ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nFeature_RNA < hbca_cutoffs$nFeature_RNA$max))``` being filtered.
+
+3. ```nCount_RNA > min_nCount``` results in 
+
+previous result was ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nCount_RNA > min_nCount))``` being filtered.
+
+new result would be ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nCount_RNA > hbca_cutoffs$nCount_RNA$min))``` being filtered.
+
+4. ```nCount_RNA < max_nCount``` results in
+
+previous result was ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nCount_RNA < max_nCount))``` being filtered.
+
+new result would be ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = nCount_RNA < hbca_cutoffs$nCount_RNA$max))``` being filtered.
+
+5. ```percent.mt < max_mito``` results in 
+
+previous result was ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = percent.mt < max_mito))``` being filtered.
+
+new result would be ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = percent.mt < hbca_cutoffs$percent.mt$max))``` being filtered.
+
+6. ```percent.rb < max_ribo``` results in 
+
+previous result was ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = percent.rb < max_ribo))``` being filtered.
+
+new result would be ```r ncol(unfiltered_hbca) - ncol(subset(unfiltered_hbca, subset = percent.rb < hbca_cutoffs$percent.rb$max))``` being filtered.
+
+7. Total amount filtered 
+
+Previous total amount filtered is ```r ncol(unfiltered_hbca) - ncol(hbca)```.
+
+For the mad filtering total amount filtered would be ```r ncol(unfiltered_hbca) - ncol(hbca_mad_filtered)```.
+
+Another reason not to use the mean is the shear number of zeros you will have the single cell data. This will result may much lower cuts offs than median methods. 
+
+Overall, the threshold we choose would results in the following ```r ncol(hbca) - ncol(hbca_mad_filtered)``` cells compared to the previous hard cut offs. 
+
+We will be using the hard cuts for the rest of the analysis. However, this section is meant to show you a different way to think about the sample specific cut offs. 
+
+__Questions__ 
+
+1. What are the pros and cons of sample specific cut offs? 
+
+2. What are the pros and cons of hard preset cut offs? 
+
+## Data Normalization
+### sctransform
+We diverge a little from the paper here due to using the SCTranform on mito but it possible to do this on other features which you feel are changing or most effecting the outcome. This is one of the slower functions and one I usually suggest that you use on a cluster, not on individuals laptops. However, most standard laptops and desktops can handle 1 to 5 samples for SCTransform or around 5k to 50K cells. When you go beyond 50K cells I suggest you start looking into a cluster, or verify that you computer can handle it. Note, if you do not have multiple processors you will run into issues or the analysis will be very slow. 
+
+Seurat provides a fairly good walk through - https://satijalab.org/seurat/articles/sctransform_vignette 
+
+It also works to replace the following three commands which were used in the paper: 
+specifically ```NormalizeData()```, ```ScaleData()```, and ```FindVariableFeatures()```.
+
+Function: 
+1. ```SCTransform``` - There is a whole vignette and papers specifically on what this does. However, what should keep in mind is this (normalizes, scales, regresses out specific variables usually items which are thought to relate to quality). In this case we will be using percentage mito to regress out. 
+
+Specifically this is used to "correct" the counts. 
+To make them easier to use you use log1p(counts) - changes the data shape to be more of normal distribution.
+
+The scale.data so that more center by calculate pearson residuals. 
+
+This also includes the sctransform variance stabilization saved in a separate data slot called new assay SCT. Note, this is one of the reasons we can overwite our data because the result is the previous data with an additional data slot. 
+
+This can be slow and often people do not look at all features, but can change the "variable.features.n" to have more items but currently it only examines the top features.
+
+__Questions to Consider__ 
+
+1. What does ```NormalizeData()``` function do? 
+  
+  Hint the standard is ```NormalizeData()``` with a scale factor of 10000.
+  
+2. What does ```ScaleData()``` function do?
+
+  Hint think of what scale.max, center and scale mean within the function.
+
+3. What ```FindVariableFeatures()``` do?
+
+  Hint think about what selection.method means for finding variable features.
+
+4. What is ```SCTransform()``` in your own words? 
+
+  Hint think about what regressing out a variable does and means for an analysis.
+  
+5. Why would on want to ```SCTransform()``` function instead just running ```NormalizeData()```, ```ScaleData()```, and ```FindVariableFeatures()``` ? 
+
+6. What is something common to regression on in ```SCTransform()``` function? 
+
+7. Does regressing this variable out making biological sense to you or not? (Why?)
+
+
+Do not worry if this print out a lot to screen.
+
+You can lower the number of feature variable.features.n. Defaul is 3000.
+```{r sctransform,warning = FALSE}
+hbca <- SCTransform(hbca, vars.to.regress = "percent.mt", 
+                    do.scale = TRUE, verbose = FALSE, 
+                      variable.features.n = 5000)
+```
+
+### Variable genes
+Here we examine the identified most highly variable genes.
+
+These genes might provide information about the sample or clusters. If you are looking at multiple different items, they might show you batch effects or effects between groups. House keeping genes would not be expected to be in this, but cell type or treatment specific genes might show up here.
+
+```{r topfeatures}
+top10 <- head(VariableFeatures(hbca), 10)
+top10
+```
+
+Here we plot the genes to examine the different features with labels. 
+
+Function: 
+
+1. ```VariableFeaturePlot``` this highlights all the variable features. 
+this is a dot plot that shows residual variance and the generic mean. 
+
+```{r labtop10_plot}
+# plot variable features with and without labels
+var_plot <- VariableFeaturePlot(hbca)
+labtop10_plot <- LabelPoints(plot = var_plot, points = top10, repel = TRUE)
+labtop10_plot
+```
+
+## Linear dimensional reduction 
+Here we start to run different linear reduction. 
+One of the the most standard methods of dimensional reduction is PCA. 
+
+Function: 
+
+1. ```RunPCA``` This run the PCA for dimension reduction.
+```{r run_pca}
+hbca <- RunPCA(hbca, features = VariableFeatures(object = hbca))
+```
+
+Here we examine and visualize the PCA results by printing them out.
+```{r pca_results}
+print(hbca[["pca"]], dims = 1:5, nfeatures = 5)
+```
+
+Here we visualize the PCA results for the first 2 dimensions looking at the associated with reduction components.
+
+Function: 
+
+2. ```VizDimLoadings``` This examine the top genes associated with reduction components, but component spread.
+
+```{r VizDim}
+VizDimLoadings(hbca, dims = 1:2, reduction = "pca")
+```
+
+This next visualization is the most standard method of looking at these items. 
+
+Function: 
+
+3. ```DimPlot``` Plots the PCA for the first components.
+
+```{r DimPlot}
+DimPlot(hbca, reduction = "pca") + NoLegend()
+```
+
+This next visualization examined the top genes that are differentially expressed for the first nine Principle components. This example used 500 cells and you can see the move variable balanced selection for either end of the expression. 
+
+Function: 
+
+4. ```DimHeatmap``` this shows the different genes expressed at the different edges of each principle components. 
+
+```{r DimHeatmap_9, fig.width = 9, fig.height=9}
+DimHeatmap(hbca, dims = 1:9, cells = 500, balanced = TRUE)
+```
+
+## Determine best dims
+```{r papercutoff_dim}
+paper_dim <- 20
+```
+One issue that usually occurs is selecting the best dimensions the number of dims to be used. 
+In the paper they used around ```r paper_dim```. However, if you examine the curve for a single sample you might see more of slow progression. 
+
+Function: 
+
+1. ```ElbowPlot``` this plots the standard dev of the PCA to try. You can actually change which type of reduction you use too. In theory, you want to select where it starts to bend. 
+
+```{r ElbowPlot}
+ElbowPlot(hbca, ndims = 50)
+```
+
+## Cluster
+Here we find the neighbors using the selected number of dims.
+Since we are copying the paper so we select ```r paper_dim``` we used that to find the Neighbors.
+
+Function: 
+
+1.```FindNeighbors``` find it based on graph that was used, with a specific metric. It runs through multiple set ups. You can adjust a few items here such as metric - the distant standard used is euclidean. 
+
+```{r FindNeighbors}
+hbca <- FindNeighbors(hbca, dims = 1:paper_dim)
+```
+
+For clustering in the paper they use a specific resolution. 
+```{r papercutoff_res}
+low_res <- 0.1
+high_res <- 0.8
+paper_res <- 0.2
+```
+
+Find the clusters for the three different resolutions.
+Function: 
+
+2. ```FindClusters``` based on the resolution. 
+
+Setting resolution basically find resolution and adjust. 
+```{r FindClusters}
+hbca <- FindClusters(hbca, 
+                     resolution = c(low_res,high_res,paper_res),
+                     reduction = "umap")
+```
+
+Create the Umap visualization based on the paper dims.
+
+__Note__ that it is important items to keep in mind is that you can change a lot of how cells appear or are displayed in a umap using parameters such as spread.
+
+__Note__ that the seed can change out the outcome. 
+
+__Note__ other parameters some will use to adjust to get the "best umap graph" include but are not limited to ```n.neighbors```, ```n.epochs```, ```min.dist``` and ```spread```.
+
+You can use functions like group.by to provide splitting. 
+
+```{r run_umap}
+hbca <- RunUMAP(hbca, dims = 1:paper_dim, spread=1)
+```
+
+### Resolution
+```{r low_res_cluster, fig.height=3.5}
+DimPlot(hbca, reduction = "umap", group.by=paste0("SCT_snn_res.", c(low_res, high_res, paper_res)))
+```
+
+## Differentially Expressed Genes
+One of the major parts of single cell analysis is the differential expression (DE) between clusters or groups. 
+
+In this case we can see an example of what the DE analysis between 2 groups is. The default is examining a single cluster (in this case looking at `#6`) against all other clusters. 
+
+```{r marker_6_v_all}
+cluster6.markers_all <- FindMarkers(hbca, ident.1 = 6)
+head(cluster6.markers_all, n = 5)
+```
+
+One of the common methods of determine what clusters are is to look at what their top genes are compared to other clusters, and to examine only positive markers meaning the presence is noticed not in something else.
+
+```{r FindSelectMarkers}
+# find markers for every cluster compared to all remaining cells, report only the positive
+# ones
+hbca.markers <- FindAllMarkers(hbca, only.pos = TRUE)
+hbca.markers.top <- hbca.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 0.8) # increase
+
+dim(hbca.markers)
+dim(hbca.markers.top)
+```
+There are a number of different methods to compare the DE using Seurat. We will discuss some of them after merging as you usually want to handle them across groups.
+
+## Canonical Genes 
+Often it is good to have a some genes that you expect to be high in specific clusters based on literate. 
+
+__Note__ that depending on your cell types, organ type and whether you are looking at single cell or single nuclei and what species you are looking at the expect gene list might change. 
+
+However, it is good to have an idea what you want to look at first. Not so much as a guide, but more as a sanity check. 
+
+For example if you do FACs sorting, for example enriching for CD45+ cells, you expect that will have enrichment for various types of white blood cells, particularly T cells and B cells. Therefore it is good to have both markers for what you expect to be there and what you expect to be removed, namely you expect to have less Endothelial and Epithelial genes. 
+
+I strongly recommend actually putting this into an tab delim sheet and reading it in. That will allow the genes to be a little more fluid. 
+
+Requires: 
+
+1. ```readxl``` - library set that lets you read in excel files. This is a very useful package that allows you use excel sheets in addition to csv files. 
+
+2. ```read_excel``` - actual function for reading in excel files. 
+
+```{r canonical_genes_sheet}
+# partly hard coded due to path name but inside is not
+my_Guided_Markers_path <- paste0(your_working_dir,"/input/Guided_Markers.xlsx")
+
+# read file in
+user_markers <- readxl::read_excel(my_Guided_Markers_path)
+user_markers <- as.data.frame(user_markers)
+
+# view file
+user_markers[1:3,]
+```
+
+However you can also fully hardcode it like this. 
+
+```{r canonical_genes_hardcoding}
+# Non Immune
+# Endothelial
+Endo_genes <- c("CDH5","VWF","PECAM1","ESAM","THBD","CD36", "CD34", "HEG1")
+# Epithelial
+Epi_genes <- c("EPCAM","KRT5","KRT17","KRT18","KRT19", "KRT8", "KRT14") #"KRT6"
+# Basal 
+Basal_genes <- c("KRT14","KRT17","KRT5") 
+# LumHR 
+LumHR_genes <- c("KRT18","KRT8","KRT19") 
+# LumHR 
+LumSec_genes <- c("KRT15","KRT23","KRT16","KRT7") 
+kartins <- c(Basal_genes, LumHR_genes, LumHR_genes)
+# Adipose
+Adipo_genes <- c("APMAP","ADIPOQ","ADIPOQ-AS1","TPRA1")
+# Fibroblast Genes
+Fibro_genes <- c("COL1A1","LUM","FBLN1", "DCN", "FBN1", "COL1A2", "PCOLCE")
+non_immune_genes <- c(Endo_genes, Epi_genes, Adipo_genes,Fibro_genes)
+#########################################################################
+# Immune and lymphocytes
+# T-cells
+Tcell_genes <- c("CD3D","CD4","CD8A", "TRAC", "TRBC1", "TRBC2", "IL7R", "CD96")
+# B-cells
+Bcell_genes <- c("CD19","MS4A1","CD79A","CD79B","BANK1", "SEL1L3", "IGHM", "IGLC3")
+#NK killer cells
+NKill_genes <-  c("NKG7","GNLY","CTSW")
+# General Immune genes
+Immun_genes <- c("PTPRC","SRGN","TYROBP") # double check
+
+lymphocytes_cluster_genes <- c(Tcell_genes, Bcell_genes, NKill_genes,Immun_genes)
+#########################################################################
+# Myeloid
+myeloid_genes <- c("FCER1G", "ITGAM", "FCGR3A") # the CD1c+ myeloid DCs, the CD141+ myeloid DCs and the CD303+ 
+# Red Blood Cells
+RedBld_genes <- c("HBA1","HBA2","HBB")
+# Macrophages
+Macro_genes <- c("CD14","CD68","CD163","C1QA", "C1QB", "MRC1", "MSR1", "MS4A7")
+# Monocytes
+Monoc_genes <- c("LST1","FCGR3A","AIF1", "MAFB", "MS4A6A", "ANPEP", "LYZ")
+# Dendrite genes
+Dendr_genes <- c("LILRA4", "IRF7", "CLEC9A", "CD1C", "TCF4")
+myeloid_cluster_genes <- c(myeloid_genes,RedBld_genes,Macro_genes, Monoc_genes,Dendr_genes)
+
+#########################################################################
+# here are some qc features ones might use.
+QC_features <- c("nCount_RNA", "nFeature_RNA","percent.mt", "percent.rb")
+```
+
+### Violin plot
+Often there are a few genes that we like to examine based on canonical markers or test the quality control of the different clusters. 
+
+For example clusters with very low number of counts, or high mito or ribo might be removed manually in addition tot the cut off.
+
+Further clusters have genes that are expected to never be combined are sometimes joined. 
+
+1. ```VlnPlot``` - draws a violin plot of the data usually based on gene expression, metrics or scores. It is often groupped by cluster or cell type. 
+
+This plots shows the most common features that are using during quality control for single cell RNA data. 
+
+#### QC Metrics
+```{r violin_plot_qc}
+VlnPlot(hbca, features = QC_features, assay="RNA", group.by=paste0("SCT_snn_res.",paper_res))
+```
+
+You can do this for other genes as well.
+
+#### Endothelial
+
+```{r violin_plot_Endothelial}
+VlnPlot(hbca, features = Endo_genes[1:6], group.by=paste0("SCT_snn_res.",paper_res), layer = "data")
+```
+
+### Feature plot
+
+1. ```FeaturePlot``` - this plots a umap but colors the item based on the number. Color scale and what assay is plotted can be changed among other items.
+
+#### QC Metrics
+You can similarly examine genes using the feature plot to look at the QC results.
+```{r feature_plot_qc}
+FeaturePlot(hbca, features = QC_features)
+```
+
+#### Endothelial
+You can examine the genes in the umaps as well. 
+```{r feature_plot_endo}
+FeaturePlot(hbca, features = Endo_genes[1:4])
+```
+
+#### Immune
+```{r feature_plot_immune}
+FeaturePlot(hbca, features = Immun_genes[1:4])
+```
+
+#### Fibroblasts
+```{r feature_plot_fibro}
+FeaturePlot(hbca, features = Fibro_genes[1:4])
+```
+
+#### Co-visualize two features 
+This is very useful when examine two genes that where you are interested in the interactions, or you wanted to look at focal group.
+```{r feature_plot_2viz}
+FeaturePlot(hbca, features = c("DCN", "FBLN1"), blend = TRUE)
+```
+
+### Ridge Plots
+These are from using the plot feature ```ggridges```. It allows us to visualize single cell expression distributions in each cluster while looking at the distribution.
+
+1. ```RidgePlot``` shows the expression of genes across clusters. This is not as smoothed out as violin.
+
+#### Endothelial
+You can examine the genes in the umaps as well. 
+```{r ridge_plot_endo}
+RidgePlot(hbca, features = Endo_genes[1:4], ncol = 2, layer = "data")
+```
+
+#### Immune
+```{r ridge_plot_immune}
+RidgePlot(hbca, features = Fibro_genes[1:4], ncol = 2, layer = "data")
+```
+
+#### Fibroblasts
+```{r ridge_plot_fibro}
+RidgePlot(hbca, features = Immun_genes[1:4], ncol = 2, layer = "data")
+```
+
+### Dot Plots 
+While it is good to visualize these items more side by side, sometimes it is good to examine across the different samples. Dot plots are a good way to do that. Dot plots often allow you to examine a larger number of genes across clusters and, if doing manual naming, can assist. However, manual naming is not always the best. 
+Function: 
+1. ```DotPlot``` shows the proportion of features by cluster. 
+
+#### Non Immune Genes
+```{r dot_plot_nonimmune}
+DotPlot(hbca, features = non_immune_genes) + RotatedAxis()
+```
+
+#### Lymphocytes Genes
+```{r dot_plot_lymphocytes}
+DotPlot(hbca, features = lymphocytes_cluster_genes) + RotatedAxis()
+```
+
+#### Myeloid Genes
+```{r dot_plot_myeloid}
+DotPlot(hbca, features = unique(myeloid_cluster_genes)) + RotatedAxis()
+```
+
+### Heatmaps Plots 
+
+#### Non Immune Genes
+```{r do_plot_nonimmune}
+DoHeatmap(subset(hbca, downsample = 100), features = non_immune_genes, size = 3)
+```
+
+#### Lymphocytes Genes
+```{r do_plot_lymphocytes}
+DoHeatmap(subset(hbca, downsample = 100), features = lymphocytes_cluster_genes, size = 3)
+```
+
+#### Myeloid Genes
+You can change the slot you are pulling from
+```{r do_plot_myeloid}
+DoHeatmap(subset(hbca, downsample = 100), features = myeloid_cluster_genes, size = 3)
+```
+
+## Cluster Naming Manual 
+You can manually assign cluster names. Using this features, but some of the labels are more difficult than others. 
+
+For example, just based on what we have looked at you might start the preliminary labeling as this. 
+
+However this is likely not enough. There items you might want to remove, or change. And some cell types will not show up when you have so few cells. Which is why often this labeling step is left more for the later items, while you can get started it might not be the best labels to start.
+
+```{r manu_clusters_names}
+#new.cluster.ids <- c("Fibroblast_0", "Perivascular_1", "Underclustered_2",
+#                     "Endothelial_3", "Lymphocytes_4", 
+#                     "Lum_Epithelial_5", "Basal_Epithelial_6", 
+#                     "Myeloid_7")
+# new clusters
+# note some i have labeled with more than one item because the cluster level was lower
+new.cluster.ids <- c("Fibroblast_0", "Vascular_Myeloid_Endothelial_1", "Perivascular_2",
+                     "Perivascular_Red_Blood_3", "Vascular_Macrophages_4", "Lymphocytes_5", 
+                     "Lum_Epithelial_6", "Basal_Epithelial_7", 
+                     "Myeloid_8")
+
+
+names(new.cluster.ids) <- levels(hbca)
+hbca <- RenameIdents(hbca, new.cluster.ids)
+DimPlot(hbca, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+```
+
+__Note__ I named one of the clusters as undercluster. Why? 
+
+__Note__ I names one of the clusters as Perivascular. Why might that be wrong?
+
+When naming, we need to consider the different lists of  the genes selected. 
+For example we can look at the following gene lists using dot plots.
+
+```{r dot_plot_graphs, eval=TRUE}
+DotPlot(hbca, features = Epi_genes) + RotatedAxis() 
+#DotPlot(hbca, features = unique(kartins)) + RotatedAxis()
+#DotPlot(hbca, features = Fibro_genes) + RotatedAxis()
+#DotPlot(hbca, features = Tcell_genes) + RotatedAxis()
+#DotPlot(hbca, features = Bcell_genes) + RotatedAxis()
+#DotPlot(hbca, features = NKill_genes) + RotatedAxis()
+#DotPlot(hbca, features = Immun_genes) + RotatedAxis()
+#DotPlot(hbca, features = myeloid_genes) + RotatedAxis()
+#DotPlot(hbca, features = non_immune_genes) + RotatedAxis()
+#DotPlot(hbca, features = lymphocytes_cluster_genes) + RotatedAxis()
+```
+
+Or we could use the user marker information we provided using the user information.
+```{r dot_plot_graphs_macrophages, eval=TRUE}
+DotPlot(hbca, features = unique(user_markers$Gene[user_markers$Celltype=="Macrophages"]), assay="RNA") + RotatedAxis()
+```
+
+Or we could examine the same information using the heatmaps and using the top marker genes found earlier. 
+```{r heatmap_graphs, eval=TRUE}
+DoHeatmap(subset(hbca, downsample = 100), 
+          features = hbca.markers.top$gene, 
+          size = 3)
+```
+
+Or you can compare them base on a single cluster against the other clusters. 
+Such as the `Perivascular` or cluster 1 against the other clusters. 
+
+```{r heatmap_graphs_peri, eval=TRUE}
+cluster1.markers <- FindMarkers(hbca, ident.1 = 1, group.by = "seurat_clusters")
+head(cluster1.markers)
+# selected the ones with fold change greater than 0.8
+cluster1.markers.top <- cluster1.markers %>%
+    dplyr::filter(avg_log2FC > 0.8)
+DoHeatmap(subset(hbca, downsample = 100), features = rownames(cluster1.markers.top), size = 3)
+```
+
+Question: 
+1. What other names might be appropriate for these clusters? 
+2. How and why would you name this sample differently if you were using a different resolution? Specifically the low resolution?
+
+# Saving
+You can save this individual output using RDS. This saves the specific object specified. However, be careful when saving data that you know how the data object was processed. It is best practice to the output flow from one script to the next and to be used. However, you also need to know what was done. This means keeping track of all processing steps. Often one the best ways to do this to do all your coding in items like markdown reports or use extensive comments. 
+
+Functions: 
+1. ```saveRDS``` - saves object. This does not provide the name of the object you need to use ```readRDS``` to get the object into a new R session.
+2. ```.Platform$file.sep``` - give the correct separator so you don't have to worry. 
+
+```{r saving_mydata, eval=FALSE}
+dir.create("output")
+file_separator <- .Platform$file.sep
+saveRDS(hbca, file=paste0("ouput", file_separator, sample_name, "_basic_scRNA.RDS"))
+```
+
+# Session Information 
+For reproducible research, one item to keep in mind is always knowing what packages you used so someone else can use it. Therefore, a good function and method is to always output this at the end of your sessions to you know what you did and had. 
+
+```{r SessionInfo}
+sessionInfo()
+```

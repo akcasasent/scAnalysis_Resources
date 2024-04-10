@@ -1,0 +1,843 @@
+---
+title: "Seurat - Guided Tutorial using scRNA Breast Samples"
+author: "Anna K. Casasent, PhD and Rachel Dittmar, PhD"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# output alternative github_document 
+knitr::opts_chunk$set(echo = TRUE, fig.width = 9)
+```
+
+# Introduction
+
+This is an R Markdown document that was designed to review Seurat and basic analysis of single cell RNA-seq (scRNA) data. For this tutorial we will be using a few samples from ```GSE235326``` from Kumar T, Nee K, Wei R, He S et al. A spatially resolved single-cell genomic atlas of the adult human breast. Nature 2023 Aug;620(7972):181-191. The samples selected from this data set are from 10x Genomics Chromium Single Cell 3' v3.1 Chemistry. 
+
+This tutorial will review the following items in standard analysis of using the Seurat package: 
+
+1. Merging samples
+    * Merging samples allows one to project multiple samples onto the same space.
+    * Merging does not require integration or adjustments 
+    * This is a more "raw" projection allowing testing for batch effects and the need for correction. 
+    
+2. Discussion and example of basic sample integration 
+    * Seurat internal options - CCA, RPCA, or others
+    * Harmony - fast and by sample
+    * Others such as scINV - 
+
+3. Assigning cell type identity to clusters (not covered in this tutorial)
+    * manual assignment based on top genes 
+    * non-manual assignment based on label transfer from using libraries like SingleR (automated methods not covered in this demo)
+
+# R project
+
+## Helpful R tips 
+
+* If you want to know more about a function there is a function you can use  ```?FUNCTION_NAME``` to examine the inputs, where ```FUNCTION_NAME``` is the name of the function using the correct function capitalization. 
+
+* If you doing this in an interactive version you can use the files location and walk the click through to get the data location and set a new direction - using R studio use the side panel with the Files and you can walk through your home directory and set a new directory. 
+
+## libraries 
+We will be using the following libraries. These should be available if you are using the server. However, you might need to install them. Note this tutorial was prepared using ```r version$version.string``` and Seurat 4.
+
+If you needed to install them for: 
+
+1. harmony - ```install.packages('harmony')```
+
+```{r libraries}
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(readxl)
+library(harmony)
+```
+
+## Set working direcotry 
+This will need to be changed to the specific location where you have placed the data.
+You should specific where you are working and set the directory.
+
+```{r setdir}
+your_working_dir <- "/Users/akcasasent/Desktop/Teaching/GSE235326/"
+setwd(your_working_dir)
+```
+
+# Filter Certia
+```{r filter}
+# primary filter
+min_cells <- 0
+min_features <- 100
+
+# paper info
+paper_dim <- 30
+paper_res <- 0.2
+
+# secondary filter
+min_nFeature <- 200
+max_nFeature <- 2500
+min_nCount <- 500
+max_nCount <- 20000
+
+# after cluster based filtering (in this case)
+max_mito <- 10
+max_ribo <- 50
+```
+
+# Per Merging Clean up
+
+Before merging samples into one data set, I strongly suggest that you go through each sample individually to identify the clusters. This can also serve as a cross check to make sure that once you merge and integrate your samples, the clustering makes sense.
+
+This point is also a good time to look at "bad" clusters, which have only mito or ribo genes differentially expressed or highly expressed. However, note that you need to be careful about these clean up steps. 
+
+Here, I am going to show the clean up after the merging/integrating for the sake of time. 
+
+However, I want it noted that each of these steps should actually be run on each individual sample for the best results. This should also reduce the number of cells you drop overall.
+
+# Merging and Intergration 
+In science, we usually have multiple samples that we want to study together, rather than looking at a single sample (as we did in the previous Rmd file). Let’s discuss how we can handle multiple samples, including merging and integrating them.
+
+__Note__ This set up is not very helpful if you can only examine a single sample. 
+
+So, how do you handle multiple samples? 
+
+## Merging 
+You can merge samples directly when you are reading in the samples using for loops or applies.
+
+Before merging, a lot of time you will need to create the sample object(s) and you might want to add annotations based on sample information from a sample sheet so that the format is the same across all samples. (Seurat 5 is better sited to this but it possible using Seurat4 as well.)
+
+Here we do an example with 4 samples, but shown in a way that it can be expanded to many more samples. In this case we ran it 2 samples that were processed with a 3 hour digestion and 3 samples with an overnight digestion.
+
+Setting the directories that we are using to read in information or files.
+```{r directories}
+input_dir <- paste0(your_working_dir, "input/")
+data_dir <- paste0(your_working_dir, "data/")
+```
+
+1. get the names of the sample to be run 
+
+You will want to have a list of samples of interest 
+In some cases, you might want this to be the outer files, or label that can be cross referenced. 
+
+```{r sample_list}
+# gets the list of samples of interest
+# in this case by Accession Number
+# this could also be done using files read as well.
+
+# 4 samples 2 left, 2 right, 2 hr and 2 overnight 
+#sam_names_list <- c("GSM7500363","GSM7500362", "GSM7500360", "GSM7500359") 
+
+# 4 samples 2 from over night 2 from 3 hour, all from contra
+sam_names_list <- c("GSM7500495", "GSM7500499", "GSM7500500", "GSM7500512")
+# extra 
+# "GSM7500496"
+# "GSM7500513"
+```
+
+2. gets the sample information file
+
+Sample information can be read in using the files of input.
+```{r sample_info}
+# gets the list sample information file 
+sample_info <- readxl::read_excel(paste0(input_dir,"Sample_Info.xlsx"))
+sample_info <- as.data.frame(sample_info)
+```
+
+3. select just the samples of interest
+
+This allows you to select only a few samples -- basically the ones from the list provided earlier.
+```{r sample_sel}
+# selects only the samples of interest 
+sel_sample_info <-  sample_info[sapply(sample_info$Accession, function(x) any(sam_names_list==x)),]
+sel_sample_info
+```
+
+4. loop that reads in the files, creates seurat object and adds the meta data based on each sample.
+
+Functions used in loop:  
+
+```for``` - Loop is useful when the number of iterations is known or fixed. It loops through each of the individual item in a list. 
+
+```which``` - returns the position of elements in a logical vector that are TRUE. 
+
+```get``` - gets an object ```x``` using the name of string of the object from the a specific environment. The default is your working environment. 
+
+```assign``` - takes the ```x``` for the string character of the name, and value is object that will be assigned this name. This basically creates a new object of the same as value. It works great in loops to create specific objects names.
+
+```sapply``` - is another version of apply, which is also called simplified apply. It only required an ```X``` a vector, list or object. This returns a vector or a matrix. 
+
+Other good points for ```sapply``` 
+  * If every element in the list returned by the function is of length 1, a vector is returned.
+  * If every element in the list returned by the function is a vector of the same length (>1), a matrix is returned.
+  * If lengths vary, simplification is not possible, and a list is returned.
+
+```length``` - the length provides a numeric of the number of elements in a list or vectors.
+
+```break``` - this is a statement is essential for controlling the flow of execution in loops. It allows for an immediate exit from a loop, even if the loop's condition is still true.
+
+```is.null``` - provides a logical. TRUE is it is null, and FALSE if is something other than null. 
+
+```!``` - this is the negative. 
+
+```rm``` - this is used to removed each of object. It is a good to clean up after a loop. Especially temp objects such as indexes that would otherwise clutter you environment.
+
+```{r sample_meta_loop}
+# creates a null object which will hold the list of all the seurat objects of interest 
+# not that often you would likely want to create a processing RMD for each individual sample. However, I would suggest you do so.
+assign_name_list <- NULL
+
+# so you don't need to get the path info each time
+sample_paths <- list.files(data_dir, full.names = TRUE)
+  
+# loop through the samples of interest
+for(sample_name in sam_names_list)
+{
+  #path for each sample if they were in unique folders
+  #sample_path <- file.path(general_path,sample_name)
+  
+  #gets the index that the sample path for specific 
+  # named vector where the name is the sample location
+  sample_index <- which(sapply(sample_paths, function(x) 
+    {grep(pattern=sample_name, x)}) >0)
+  
+  # this part is code to check if you have multiple matches or no matches and breaks out of the loop if this occurs.
+  if(length(sample_index) > 1)
+  {
+    print("multiple matches")
+    break
+  }
+  if(length(sample_index) == 0)
+  {
+    print("no matches")
+    break
+  }
+  
+  # this uses the min_cells and min_features from earlier.
+  # this can also be set to 0 is you want to do filtering later.
+  sample_mtx <- Read10X_h5(names(sample_index)) 
+  sample_seurat <- CreateSeuratObject(sample_mtx, min.cells = min_cells, 
+                                      min.features = min_features, 
+                                      project = sample_name)
+
+  # calculate the mito and ribo percentage
+  sample_seurat[["percent.mt"]] <- PercentageFeatureSet(sample_seurat, pattern = "^MT-")
+  sample_seurat[["percent.rb"]] <- PercentageFeatureSet(sample_seurat, pattern = "^RP[SL]")
+  
+  # for each column in the sample info file add it to meta data for the sample
+  for(metaCol in colnames(sel_sample_info))
+  {
+    # row, col
+    # WARNING Hardcoding below
+    # Accession hard coded for getting info
+    sample_seurat@meta.data[[metaCol]] <- sel_sample_info[which(sel_sample_info$Accession==sample_name), which(colnames(sel_sample_info) == metaCol)]
+  }
+  
+  # manually / Hardcoding this would look something like this 
+  #sample_seurat_sub@meta.data[["Treatment"]] <- sel_sample_info$Treatment[which(sel_sample_info$Sample==sample_name)]
+  
+  #filter samples
+  sample_seurat <- subset(sample_seurat, subset = nFeature_RNA > min_nFeature &
+                 nFeature_RNA < max_nFeature & 
+                 nCount_RNA > min_nCount & 
+                 nCount_RNA < max_nCount ) 
+  
+  # assigns to a new alias 
+  # this good way to make objects in loops
+  print(paste0(sample_name,"_seurat")) 
+  assign_name <- paste0(sample_name,"_seurat")
+  assign(x=assign_name, value = sample_seurat)
+  
+  #compiles the list of all names
+  if(!is.null(assign_name_list)){
+       assign_name_list <- c(assign_name_list,assign_name)
+  }
+  if(is.null(assign_name_list)){
+    assign_name_list <- assign_name
+  }
+}
+
+# clean up loop info 
+rm(sample_index, sample_mtx, sample_seurat, sample_name, assign_name)
+
+```
+
+## Merging
+When you are merging the samples, you just take the list of samples that you have. 
+It should also include all the items in the meta data that you previously had. 
+
+Note that while merge does not integrate, it lets you see if you need to integrate and possibly over what.
+
+```{r merge}
+# note merge DOES not integrate 
+hbca.merged <- merge(get(assign_name_list[1]), y = sapply(assign_name_list[-1],function(x) get(x)),
+                       add.cell.ids = sam_names_list,
+                       project = "HBCA")
+#clean up data
+rm(list =assign_name_list)
+rm(assign_name_list)
+gc()
+```
+
+## Umap merged based on Sample ID
+After samples are merged you have to do dim reduction, find neighbors, clusters and then create a UMAP from that data.
+
+This takes a little bit of time. 
+
+```{r merged_umap}
+hbca.merged <- ScaleData(hbca.merged)
+hbca.merged <- FindVariableFeatures(hbca.merged)
+hbca.merged <- RunPCA(hbca.merged, features = VariableFeatures(object = hbca.merged))
+hbca.merged <- FindNeighbors(hbca.merged, dims = 1:paper_dim)
+hbca.merged <- FindClusters(hbca.merged, resolution = paper_res)
+hbca.merged <- RunUMAP(hbca.merged, dims = 1:paper_dim, spread=1)
+```
+
+### Cluster umap by
+Plot the umap while looking at different clusters.
+```{r merged_umap_plot_res}
+DimPlot(hbca.merged, reduction = "umap", group.by=paste0("RNA_snn_res.",paper_res))
+```
+
+#### Plot by Accession
+```{r merged_umap_plot_accession}
+DimPlot(hbca.merged, reduction = "umap", group.by="Accession")
+```
+
+#### Plot by patient.
+```{r merged_umap_plot_patient}
+DimPlot(hbca.merged, reduction = "umap", group.by="Patient_ID")
+```
+
+#### Plot by side.
+In some cases in this case side is just the contralateral side. 
+```{r merged_umap_plot_side}
+DimPlot(hbca.merged, reduction = "umap", group.by="Side")
+```
+
+#### Plot by digestion
+Here we can clearly see that the Digestion  likely has the largest batch effect and is therefore the best one to integrate over. 
+
+```{r merged_umap_plot_digestion}
+DimPlot(hbca.merged, reduction = "umap", group.by="Digestion")
+```
+
+```{r merged_umap_plot_digestion_side}
+DimPlot(hbca.merged, reduction = "umap", group.by="Patient_ID", split.by = "Digestion")
+```
+
+# Intergration 
+## SCTransform
+SCTransform should be performed on each sample individually before integration, but you also need it to be the same model which can be confusing. 
+
+One of the major issues you will face is that SCTranform takes a lot of memory. Therefore, some systems will have trouble running this will so many samples. We are only using 4 samples in order to be able to run on the machines provided. If there are issues we can reduce the number of samples down to 2 and run it just on those 2 samples.
+
+However this will result in errors such as "SCT assay is comprised of multiple SCT models". 
+
+Functions: 
+
+```Sys.time``` - this provides system time. It allows you to figure out how long items took to run.
+
+```%>%``` - this is from ```dplyr``` library. It allows you push the object to the next function. 
+
+This allows you can move items to the next function. Here is an example of how push the function output to the next function. It provides a good pipeline.
+
+```{r scTranform}
+Sys.time()
+hbca.merged <- hbca.merged %>%
+  NormalizeData() %>%
+  FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>% 
+  ScaleData() %>%
+  SCTransform(vars.to.regress = c("percent.mt"))
+Sys.time()
+```
+
+## CCA Intergration
+CCA this is actually one of the strongest integration methods. 
+
+In general, I do not suggest that people use CCA because it often over integrates or over smoothes the data causing the data to look like one glob, which prevents real differences from being measured. This occurs because CCA's underlying assumption is that the samples/batches should be more similar than different.
+
+We are specifically going to correct the batches based on Digestion.
+
+To do this we need to create objects or layers for the batches. This is something that changes between seurat 4 and seurat 5. So make sure when you are working you know what version you are using. 
+
+```gc``` - this is helpful in reducing the extra variables. It stands for garbage collection. 
+
+```SplitObject``` - part of the Suerat package. This splits the object into a list. 
+
+__Note__ how the split works changes between suerat 4 and suerat 5.  
+
+```{r int_cca_seurat4_split , eval=TRUE}
+# Clear out memory 
+gc()
+# splits into different samples or groups which you want to integrate over
+# similar to how we did the SCTransform 
+# this is based on group you are integrating over.
+hbca.list <- SplitObject(hbca.merged, split.by = "Digestion")
+
+```
+
+List the different object and make sure to normalize these different items.
+
+```lapply``` - list apply. This returns the results in a list format.
+
+```{r int_cca_seurat4_list, eval=TRUE}
+hbca.list <- lapply(X = hbca.list, FUN = function(x) {
+  x <- NormalizeData(x)
+   x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+```
+
+Select features that are repeatedly variable across datasets for integration, run PCA on each dataset using these features.
+
+```SelectIntegrationFeatures``` - provides an object.list. The features is used when integrating multiple datasets. It ranks features by the number of datasets they are deemed variable in, breaking ties by the median variable feature rank across datasets. Then it returns the top scoring features by this ranking.
+
+```{r int_cca_seurat4_features, eval=TRUE}
+hbca.features <- SelectIntegrationFeatures(object.list = hbca.list, )
+hbca.list <- lapply(X = hbca.list, FUN = function(x) {
+  x <- ScaleData(x, features = hbca.features, verbose = FALSE)
+  x <- RunPCA(x, features = hbca.features, verbose = FALSE)
+})
+```
+
+The next step in CCA integration is to find anchor genes. Anchor genes are genes that do not change and can be used to combine the items (previously defined as housekeeping genes). This step may take a while depending on your sample size and number of clusters. The larger the dataset, the more "batches" and the more clusters the longer this will take. 
+
+__Note__ This is one of the items that you will really want to make sure you run as script on a HPC (high performance cluster) and that you save the results.
+
+```FindIntegrationAnchors``` - Find a set of anchors between a list of seurat objects. These anchors can later be used to integrate the objects using the IntegrateData function. The reduction matters as it how the archors are defined. 
+
+```{r int_cca_seurat4_anchor, eval=TRUE}
+Sys.time()
+hbca.anchors <- FindIntegrationAnchors(object.list = hbca.list, anchor.features = hbca.features, reduction = "cca")
+Sys.time()
+```
+
+Then we integrate using CCA. This also can take a while. 
+```{r int_cca, eval=TRUE}
+Sys.time()
+# this command creates an 'integrated' data assay
+hbca.cca <- IntegrateData(anchorset = hbca.anchors)
+Sys.time()
+```
+
+In order to make sure you are working with the integrated data, you need to change the default assay. 
+
+```DefaultAssay``` - this tells the different functions in Seurat which slot of the data to pull first. The original default was "RNA" here we reset it to use the integrated. It can be reset to also use other assays. 
+```{r int_cca_seurat4_assign}
+# you need to make sure you know what you are working with so you need to tell it
+# Note that the original, unmodified data still resides in the 'RNA' assay -- if you use that you are using the raw data
+# they won't work the same 
+# so we tell the defaults what we want to work with.
+DefaultAssay(hbca.cca) <- "integrated"
+```
+
+After you have integrated the data, you need to make sure to run the standard workflow. 
+And then you can look at the data in more depth. You still need to process the data in order for it to be examined. 
+
+```{r int_cca_seurat4_vis}
+Sys.time()
+# note that we can write it this way which takes up a lost less space and sending the each items to the next.
+# however this way can be harder to debug 
+hbca.cca <- hbca.cca %>% 
+  ScaleData() %>%
+  RunPCA(npcs = paper_dim, verbose = FALSE)  %>%
+  RunUMAP(reduction = "pca",  dims = 1:paper_dim)  %>%
+  FindNeighbors(reduction = "pca", dims = 1:paper_dim)
+
+# this can also be writen this way 
+# Run the standard workflow for visualization and clustering
+# Note that you start will scaling the data 
+# hbca.cca <- ScaleData(hbca.cca, verbose = FALSE)
+# hbca.cca <- RunPCA(hbca.cca, npcs = paper_dim, verbose = FALSE)
+# hbca.cca <- RunUMAP(hbca.cca, reduction = "pca",  dims = 1:paper_dim)
+# hbca.cca <- FindNeighbors(hbca.cca,reduction = "pca", dims = 1:paper_dim)
+Sys.time()
+```
+
+### plot of integrated data 
+
+```{r int_cca_plot_by_digestion}
+plot_by_side_one <- DimPlot(hbca.cca, reduction = "umap", group.by = "Digestion")
+plot_by_side_one
+```
+
+```{r int_cca_plot_by_digestion_split}
+plot_by_side_split <- DimPlot(hbca.cca, reduction = "umap", group.by = "Patient_ID", 
+                              split.by = "Digestion")
+plot_by_side_split
+```
+
+#### Seurat 5 changes afoot 
+__Note__ one thing to keep in mind is that the Seurat package is always evolving. In seurat 5 you can keep everything together on one object. But in seurat 4 we had to separate it out. 
+
+Take a look at the newer vigettes to get an idea: 
+https://satijalab.org/seurat/articles/integration_introduction.html
+
+It would look something like this. Note this this code chunk is not run nor checked due to eval = FALSE in the code chunk header.
+
+```{r int_cca_seurat5, eval=FALSE}
+hbca.merged <- IntegrateLayers(object = hbca.merged, method = CCAIntegration, orig.reduction = "pca", new.reduction = "integrated.cca",
+    verbose = FALSE)
+
+# re-join layers after integration
+hbca.merged[["RNA"]] <- JoinLayers(hbca.merged[["RNA"]])
+
+hbca.merged <- FindNeighbors(hbca.merged, reduction = "integrated.cca", dims = 1:paper_dim)
+hbca.merged <- FindClusters(hbca.merged, resolution = 1)
+```
+
+### Alteratively Intergration using Harmony
+
+There are actually a lot of different integration methods that can be considered. When you are working with samples that have very high diversity you will want to strongly consider what integration method makes the most sense for your samples.
+
+A major issue with integration is the concern of over correcting, while other methods do not appear to correct enough. There is a pipeline from Dr. Linghau Wang's lab that produces a good example and examines the "batches" across the different integration methods. 
+
+Another  integration tool you could consider using is Harmony, which is often used across samples or across digestions. Note that harmony is much faster than CCA, which means you can integrate over larger number of items more quickly. It also does less fitting which means that it is less likely to over correct. 
+```{r int_harmony}
+library(harmony)
+#library(SeuratWrappers)
+Sys.time()
+# this is if you are doing by sample in this case by Accession 
+#hbca.harmony <- SCTransform(hbca.merged, vars.to.regress = 'Accession')
+#hbca.harmony <- SCTransform(hbca.merged, vars.to.regress = 'Digestion')
+
+hbca.harmony <-  hbca.merged %>%
+  RunPCA() %>%
+  RunHarmony(group.by.vars='Digestion', assay.use='SCT')  %>%
+  RunUMAP(reduction = "harmony", dims = 1:paper_dim, reduction.name = 'harmonyumap', reduction.key = 'harmonyumap_') %>% 
+  FindNeighbors(reduction = "harmony", dims = 1:paper_dim)  %>% 
+  FindClusters(resolution = paper_res)
+
+hbca.harmony
+  
+#hbca.harmony <-  RunPCA(hbca.harmony)
+#hbca.harmony <- RunHarmony(hbca.harmony, group.by.vars='Digestion', assay.use='SCT')
+#hbca.harmony <- RunUMAP(hbca.harmony, reduction = "harmony", dims = 1:paper_dim, reduction.name = 'harmonyumap', reduction.key = 'harmonyumap_')
+#hbca.harmony <- FindNeighbors(hbca.harmony, reduction = "harmony", dims = 1:paper_dim)
+#hbca.harmony <- FindClusters(hbca.harmony, resolution = paper_res)
+#hbca.harmony
+Sys.time()
+```
+
+### plot of integrated data by harmony
+```{r harmony_plot_by_Digestion}
+plot_by_side_harmony <- DimPlot(hbca.harmony, reduction = "harmonyumap", group.by = "Digestion")
+plot_by_side_harmony
+```
+
+```{r harmony_plot_by_Digestion_split}
+plot_by_side_harmony <- DimPlot(hbca.harmony, reduction = "harmonyumap", group.by = "Digestion", split.by = "Digestion")
+plot_by_side_harmony
+```
+## Post Intergration Filtering (after harmony)
+
+Note, that I strongly suggest that most of the filtering take place actually sample by sample. However, here I just wanted to go through some of the clean up that you might want to do, using "overcluster" to find outliers and drop a cluster. I am partly doing this on the integrated data set to give you an idea and because precleaning the samples before integration is fairly interactive. Note that it needs to be recorded and reported, but it is often difficult for people to maintain records, that this why using the RMD or other method to recording all your pre-processing is needed to make the analysis make sense.
+
+While we previously filtered the data based on items like percentage mitochondria, number of counts and other items. 
+
+One of the major ways that cleaning can be done is by "overclustering" AKA using a high resolution and removing "bad" clusters. These cluster are clusters that are outliers for different reasons. 
+
+It could be only one patient sample is present in this cluster meaning might be a reason for someone not to trust it. This rarely happens after integration because of how integration tried to force the samples to be similar. The type of integration you use will can cause more or less smoothing. 
+
+Systematically, we can try and look for clusters to remove here based on is mostly what think are dead cells due having a higher mito, or ribo percentage.
+
+Here, we will go through the process of over clustering and checking which clusters one might want to remove. Note here we "overcluster" by what should be a lot or a very high resolution during this step. 
+```{r filter_clustering}
+hbca.harmony <- FindClusters(hbca.harmony, resolution = 1.2)
+```
+
+```{r harmony_plot_filter_clusters}
+harmony_filter_clusters_umap <- DimPlot(hbca.harmony, reduction = "harmonyumap", group.by = "SCT_snn_res.1.2", label = TRUE)
+harmony_filter_clusters_umap
+```
+
+## Mito 
+
+Which clusters have really high mito percentage? 
+
+What biological reason might a cluster have high mito score? 
+
+What technical reason might cause a cluster to have a higher mito score? 
+
+When should you remove the cluster? 
+
+The last one is the hardest. Consider if the cluster is mostly just mito genes, is there a biological reason for it, or not. Remember stress can be a biological reason, however you might have technical items that inform you as well. 
+
+```{r filter_check_mito}
+VlnPlot(hbca.harmony, features = c("percent.mt"))
+```
+## Ribo 
+
+Which clusters have really high ribo percentage? 
+
+What biological reason might a cluster have high ribo score? 
+
+What technical reason might cause a cluster to have a higher ribo score? 
+
+When should you remove the cluster? 
+
+This is similar questions as previous, but also consider if you are only seeing high ribo and mito scores.
+
+```{r filter_check_ribo}
+VlnPlot(hbca.harmony, features = c("percent.rb"))
+```
+
+## The math of filtering...
+
+You can also filter based on a statistical criteria. This is something that I suggest you do when you are actually filtering. 
+
+What would this math look like? 
+
+You can use either median (non-parametric) or mean (parametric) methods. Just know which you are using. If you have normalized like here and have not filtered on this before you can use parametric methods. If you have filtered before on these metrics, you need to change it to the non-parametic and consider if you are over filtering. 
+
+Example test would be a wilcox test between groups. Best method would be this group against all other groups. 
+
+Or you can be view as a summary table. 
+
+Here we summarize by cluster and get the mean and sd of the different metrics.
+Not that is using mean +/- 2 * sd for any of these you don't see clusters to be removed. 
+
+```{r filter_summerize}
+hbca.cluster.summary <- hbca.harmony@meta.data %>%
+    group_by(SCT_snn_res.1.2) %>%
+    summarise(mean_count = mean(nCount_RNA, na.rm = TRUE), 
+              sd_count = sd(nCount_RNA, na.rm = TRUE), 
+              mean_feature = mean(nFeature_RNA, na.rm = TRUE), 
+              sd_feature = sd(nFeature_RNA, na.rm = TRUE),
+              mean_mt = mean(percent.mt, na.rm = TRUE), 
+              sd_mt = sd(percent.mt, na.rm = TRUE), 
+              mean_rb = mean(percent.rb, na.rm = TRUE), 
+              sd_rb = sd(percent.rb, na.rm = TRUE), 
+              mean_mtrb = mean((percent.mt + percent.rb), na.rm = TRUE),
+              sd_mtrb = sd((percent.mt + percent.rb), na.rm = TRUE))
+#this lets it print out all the samples and their information.
+as.data.frame(hbca.cluster.summary)
+
+#total for all counts
+hbca.total.summary <- hbca.harmony@meta.data %>%
+    summarise(mean_count = mean(nCount_RNA, na.rm = TRUE), 
+              sd_count = sd(nCount_RNA, na.rm = TRUE), 
+              mean_feature = mean(nFeature_RNA, na.rm = TRUE), 
+              sd_feature = sd(nFeature_RNA, na.rm = TRUE),
+              mean_mt = mean(percent.mt, na.rm = TRUE), 
+              sd_mt = sd(percent.mt, na.rm = TRUE), 
+              mean_rb = mean(percent.rb, na.rm = TRUE), 
+              sd_rb = sd(percent.rb, na.rm = TRUE), 
+              mean_mtrb = mean((percent.mt + percent.rb), na.rm = TRUE),
+              sd_mtrb = sd((percent.mt + percent.rb), na.rm = TRUE))
+
+as.data.frame(hbca.total.summary)
+
+# mito cluster cutoff
+mito.cluster.cutoff <- hbca.total.summary$mean_mt + 2*hbca.total.summary$sd_mt
+mito.cluster.cutoff
+
+# ribo cluster cutoff
+ribo.cluster.cutoff <- hbca.total.summary$mean_rb + 2*hbca.total.summary$sd_rb
+ribo.cluster.cutoff
+
+# combined mito & ribo cluster cutoff
+combined.cluster.cutoff <- hbca.total.summary$mean_mtrb + 2*hbca.total.summary$sd_mtrb
+combined.cluster.cutoff
+```
+
+Without testing, you might consider dropping clusters where:
+
+Mean is above this
+
+1. `r mito.cluster.cutoff` 
+Visually you can look at the clusters and might note that the following clusters have: 
+
+low percent.mt - suggest high quality 
+high percent.mt - suggest dead/dying, stressed or high metabolically active
+```{r filter_check_mt}
+VlnPlot(hbca.harmony, features = c("percent.mt"))
+```
+
+2. `r ribo.cluster.cutoff` 
+
+Visually you can look at the clusters and might note that the following clusters have: 
+
+low percent.rb - suggest high quality 
+high percent.rb - suggest dead/dying
+```{r filter_check_rb}
+VlnPlot(hbca.harmony, features = c("percent.rb"))
+```
+
+Using these without doing official statistical tests, would remove the following clusters. 
+
+```{r cutoff.tests}
+sapply(hbca.cluster.summary$mean_mt, function(x) {x > mito.cluster.cutoff})
+sapply(hbca.cluster.summary$mean_rb, function(x) {x > ribo.cluster.cutoff})
+sapply(hbca.cluster.summary$mean_mtrb, function(x) {x > combined.cluster.cutoff})
+```
+
+So, based on this we should include the following: 
+
+```{r cutoff.tests.outliers}
+dropclusters <- hbca.cluster.summary$SCT_snn_res.1.2[sapply(hbca.cluster.summary$mean_mt, function(x) {x > mito.cluster.cutoff}) | sapply(hbca.cluster.summary$mean_rb, function(x) {x > ribo.cluster.cutoff}) | sapply(hbca.cluster.summary$mean_mtrb, function(x) {x > combined.cluster.cutoff})]
+```
+
+Based on this we will drop cluster(s) `r dropclusters`.
+
+This matches more or less what we visually saw, possibly is a little more conservative. 
+
+We also want to look at the other metrics that might be important.  
+
+## nFeature RNA
+Here we want to consider the clusters that are very low. 
+
+```{r filter_check_count}
+VlnPlot(hbca.harmony, features = c("nFeature_RNA"))
+```
+
+```{r filter_check_features}
+VlnPlot(hbca.harmony, features = c("nCount_RNA"))
+```
+
+One thing to consider it that immune cells might also have a low number features. To this end, be careful about removing cells or clusters based solely on number of features. 
+
+__Note__ in the example below I set the required number of feature to be less than required in the basic example tourtial. 
+
+```{r cutoff.tests.low}
+feature.cluster.cutoff<- hbca.total.summary$mean_feature - 2*hbca.total.summary$sd_feature
+feature.cluster.cutoff
+
+counts.cluster.cutoff<- hbca.total.summary$mean_count - 2*hbca.total.summary$sd_count
+counts.cluster.cutoff
+```
+
+While it is not logical, we can test even negative cut off, without an out of bounds check. However, to follow coding best practices if it smart to put in if/then or try/catch code for items like this. These types of coding provides a logic sanity check and prevents futures errors downstream if nonsense numbers are passed. 
+
+In this case, both cut offs are too low to be useful. But you can still double check for them using less than. 
+
+```{r cutoff.tests.low.drop}
+# add to drop clusters, only the unique clusters that should also be dropped 
+# these cut offs would be based on lowest.
+dropclusters<- unique(c(dropclusters, hbca.cluster.summary$SCT_snn_res.1.2[sapply(hbca.cluster.summary$mean_feature, function(x) {x < feature.cluster.cutoff}) | sapply(hbca.cluster.summary$mean_count, function(x) {x < counts.cluster.cutoff})]))
+```
+
+Now, we can remove our marked clusters.
+You can filter out the items based on outliers by marking a cluster as an outlier but first you need to add it to the levels. 
+
+This usually favorably interactive, but note it __must__ be recorded and reported when you are writing your methods. This is one of the parts I see the most people mess up on because they do not record how they filtered or dropped "bad" clusters, when they dropped them, how they decided that should be dropped and so forth. 
+
+```{r filter_clusters_levels}
+levels(hbca.harmony@meta.data$SCT_snn_res.1.2) <- c(levels(hbca.harmony@meta.data$SCT_snn_res.1.2), "outlier") 
+
+if(length(dropclusters) >= 1 )
+{
+  for(clust.num in dropclusters)
+  {
+    hbca.harmony@meta.data$SCT_snn_res.1.2[which(hbca.harmony@meta.data$SCT_snn_res.1.2 == clust.num)] <- "outlier"
+  }
+}
+hbca.harmony.cf <- subset(hbca.harmony, subset = SCT_snn_res.1.2 != "outlier")
+```
+
+## Sample Filtering
+Now that we have removed the cluster, we are going to set the mito/ribo filters that were previousely used by the paper. 
+
+Not the reason that you do this "second" is because the clustering was to pull out the bad cells based on them grouping together. The cluster clean up can be a fairly dangerous undertaking as it might remove clusters of interest, which are highly stressed due to treatment or nature.  However, you need to know that people do that. 
+
+Here, after that step we want to consider removing the cells using more blanket filters such as was done during the first single sample examination. 
+
+```{r sample_filtering}
+hbca.harmony.filtered <- subset(hbca.harmony.cf, subset = nFeature_RNA > min_nFeature &
+                 nFeature_RNA < max_nFeature & 
+                 nCount_RNA > min_nCount & 
+                 nCount_RNA < max_nCount & 
+                 percent.mt < max_mito & 
+                 percent.rb < max_ribo)
+```
+
+## Recluster cluster 
+After you have filtered and cleaned up, it is good to "recluster". 
+```{r recluster}
+Sys.time()
+hbca.harmony.filtered <- RunHarmony(hbca.harmony.filtered, group.by.vars='Digestion', assay.use='SCT')
+hbca.harmony.filtered <- RunUMAP(hbca.harmony.filtered, reduction = "harmony", dims = 1:paper_dim, reduction.name = 'filteredharmonyumap', reduction.key = 'filteredharmonyumap_')
+
+hbca.harmony.filtered <- FindNeighbors(hbca.harmony.filtered, reduction = "harmony", dims = 1:paper_dim)
+hbca.harmony.filtered <- FindClusters(hbca.harmony.filtered, resolution = paper_res)
+hbca.harmony.filtered
+Sys.time()
+```
+
+```{r filter_clustering_paperres}
+hbca.harmony.filtered <- FindClusters(hbca.harmony.filtered, resolution = paper_res)
+```
+
+```{r harmony_filtered_umap}
+harmony_filter_clusters_umap <- DimPlot(hbca.harmony.filtered, reduction = "filteredharmonyumap", group.by = "seurat_clusters")
+harmony_filter_clusters_umap
+```
+
+## Labeling Lower Levels
+1. Taking the Harmony interrogated data what might you name the different clusters? 
+
+2. How did you arrive at those names?  
+
+```{r clustering}
+hbca.harmony.filtered <- FindClusters(hbca.harmony.filtered, resolution = 0.1)
+```
+
+Umap of clusters
+```{r harmony_plot_by_cluster}
+harmony_clusters_umap <- DimPlot(hbca.harmony.filtered, reduction = "filteredharmonyumap", group.by = "seurat_clusters")
+harmony_clusters_umap
+```
+
+Heatmap plots of clusters. Note that I am using the RNA assay not the integrated assay. This is so that we are seeing what is different based on unchanged values, across the different clusters. 
+
+```{r harmony_heatmap}
+hbca.markers <- FindAllMarkers(hbca.harmony.filtered, assay="RNA", only.pos = TRUE)
+
+# you can change the fold change requirements 
+hbca.markers.top <- hbca.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 0.8) 
+
+hbca.markers.top <- as.data.frame(hbca.markers.top)
+
+#here we look at the just top 5 from the selected set
+top.genes <- NULL
+for(cluster.num in unique(hbca.markers.top$cluster))
+{
+  my_genes <- hbca.markers.top$gene[which(hbca.markers.top$cluster == as.numeric(cluster.num))[1:5]]
+  # for the ones that have less than 5 that make it through
+  if(any(is.na(my_genes)))
+  {
+    my_genes <- my_genes[-which(is.na(my_genes))]
+  }
+  top.genes <- c(top.genes, my_genes)
+}
+
+DoHeatmap(subset(hbca.harmony.filtered, downsample = 100), features = top.genes, size = 3)
+```
+
+If you don't want to look at the the top genes based on the clusters. 
+You can also look at the canonical genes. 
+
+```{r harmony_heatmap_canonical}
+my_Guided_Markers_path <- paste0(your_working_dir,"/input/Guided_Markers.xlsx")
+
+# read file in
+user_markers <- readxl::read_excel(my_Guided_Markers_path)
+user_markers <- as.data.frame(user_markers)
+
+# select markers from the HBCA paper
+my_makers_genes <- user_markers$Gene[user_markers$Sources=="HBCA_paper"]
+DoHeatmap(subset(hbca.harmony.filtered, downsample = 100), features = my_makers_genes, size = 3)
+```
+
+You can also consider canonical markers or using a label transfer. 
+
+For further reading I suggest, reading about singleR - https://github.com/dviraran/SingleR 
+There are also youtube videos that walk through much of this. 
+
+# Session Information 
+For reproducible research, one item to keep in mind it always good to track what packages you used so someone else can use it. Therefore, a good function and method is to always output this at the end of your sessions to you know what you did and had. 
+
+```{r SessionInfo}
+sessionInfo()
+```
