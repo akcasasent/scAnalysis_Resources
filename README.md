@@ -31,8 +31,8 @@
                 <div class="row text-left">
                     <div class="col-lg-12">
                         <ul>
-                                <h4><a href="2024/Basic_scRNA_Seurat4_Tutorial.html">Single Cell RNA: Basic Seurat Tutorial V4 </a> by Anna K. Casasent</h4> 
-                                <h4><a href="2024/Basic_scRNA_Seurat5_Tutorial.html">Single Cell RNA: Basic Seurat Tutorial V5 </a> by Anna K. Casasent</h4>
-                                <h4><a href="2024/Intergration_scRNA_Seurat4_Tutorial_sct_filter.html">Single Cell RNA: Basic Integration Tutorial V4 </a> by Anna K. Casasent</h4> 
-                                <h4><a href="2024/integration_workshopV5.html">Single Cell RNA: Basic Integration Tutorial V4 </a> by Anna K. Casasent</h4> 
+                                <h4><a href="docs/Basic_scRNA_Seurat4_Tutorial.html">Single Cell RNA: Basic Seurat Tutorial V4 </a> by Anna K. Casasent</h4> 
+                                <h4><a href="docs/Basic_scRNA_Seurat5_Tutorial.html">Single Cell RNA: Basic Seurat Tutorial V5 </a> by Anna K. Casasent</h4>
+                                <h4><a href="docs/Intergration_scRNA_Seurat4_Tutorial_sct_filter.html">Single Cell RNA: Basic Integration Tutorial V4 </a> by Anna K. Casasent</h4> 
+                                <h4><a href="docs/integration_workshopV5.html">Single Cell RNA: Basic Integration Tutorial V4 </a> by Anna K. Casasent</h4> 
             </div>
